@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/iamkaran/pms-go/internal/config"
 	"github.com/iamkaran/pms-go/internal/logger"
+	"github.com/iamkaran/pms-go/internal/transport/embedded-broker"
 	"os"
 )
 
@@ -14,4 +15,9 @@ func main() {
 	}
 	log := logger.New(cfg.Log.Level, cfg.Log.Format)
 	log.Info("pms-go starting")
+
+	err = embeddedbroker.MqttBroker(log)
+	if err != nil {
+		log.Error("error starting broker", "error", err)
+	}
 }
