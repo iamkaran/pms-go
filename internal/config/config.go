@@ -3,6 +3,8 @@ package config
 type Config struct {
 	ThingsBoard ThingsboardConfig
 	Log         LoggerConfig
+	Broker      BrokerConfig
+	Hook        BrokerHookConfig
 }
 
 func Load(configDir string) (*Config, error) {
@@ -13,6 +15,10 @@ func Load(configDir string) (*Config, error) {
 	}
 
 	if err := loadLogger(&cfg.Log, configDir+"/log.yaml"); err != nil {
+		return nil, err
+	}
+
+	if err := loadBrokerConfig(&cfg.Broker, configDir+"/broker.yaml"); err != nil {
 		return nil, err
 	}
 

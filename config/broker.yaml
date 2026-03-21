@@ -1,0 +1,5 @@
+broker:
+  tcp_id: "t1"
+  address: ":1883"
+hooks:
+  hook_id: "gateway-hook"
