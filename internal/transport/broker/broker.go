@@ -1,10 +1,8 @@
+// Package broker is responsible for recieving MQTT PUB/SUB from the thingsboard gateway
+// It is also responsible for routing the RPC and Attribute update requests from Thingsboard to the thingsboard gateways
 package broker
 
 import (
-	"os"
-	"os/signal"
-	"syscall"
-
 	"log/slog"
 
 	"github.com/iamkaran/pms-go/internal/config"
@@ -13,29 +11,20 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, log *slog.Logger) error {
+func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, log *slog.Logger) (chan TelemetryMsg, chan CriticalMsg, func(), error) {
+	server := mqtt.New(&mqtt.Options{})
 
-	sigs := make(chan os.Signal, 1)
-	done := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigs
-		done <- true
-	}()
-
-	server := mqtt.New(nil)
+	stop := func() {
+		err := server.Close()
+		if err != nil {
+			return
+		}
+	}
 
 	// To allow any connections
 	if err := server.AddHook(new(auth.AllowHook), nil); err != nil {
 		log.Error("add hook", "error", err)
-		return err
-	}
-
-	err := server.AddHook(&GatewayHooks{logger: log, brokerCfg: brokerCfg, hookCfg: hookCfg}, nil)
-	if err != nil {
-		log.Error("add hook", "error", err)
-		return err
+		return nil, nil, nil, err
 	}
 
 	tcp := listeners.NewTCP(listeners.Config{
@@ -43,27 +32,27 @@ func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, 
 		Address: brokerCfg.Address,
 	})
 
-	err = server.AddListener(tcp)
+	err := server.AddListener(tcp)
 	if err != nil {
 		log.Error("tcp listener", "error", err)
-		return err
+		return nil, nil, nil, err
 	}
 
-	errChannel := make(chan error, 1)
+	telemetryChan := make(chan TelemetryMsg, 100)
+	criticalChan := make(chan CriticalMsg, 100)
+
+	err = server.AddHook(&GatewayHooks{logger: log, brokerCfg: brokerCfg, hookCfg: hookCfg, telemetryChan: telemetryChan, criticalChan: criticalChan}, nil)
+	if err != nil {
+		log.Error("add hook", "error", err)
+		return nil, nil, nil, err
+	}
+
 	go func() {
 		err := server.Serve()
 		if err != nil {
 			log.Error("serve", "error", err)
-			errChannel <- err
 		}
 	}()
 
-	<-done
-
-	if err := server.Close(); err != nil {
-		log.Error("server closing", "error", err)
-		return err
-	}
-
-	return nil
+	return telemetryChan, criticalChan, stop, nil
 }
