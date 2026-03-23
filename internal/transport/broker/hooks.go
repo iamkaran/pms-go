@@ -46,17 +46,20 @@ func (gh *GatewayHooks) OnConnect(cl *mqtt.Client, pk packets.Packet) error {
 }
 
 func (gh *GatewayHooks) OnPublish(cl *mqtt.Client, pk packets.Packet) (packets.Packet, error) {
-	gh.logger.Info("telemetry topic", "topicName", gh.topicsCfg.TelemetryTopic)
 	switch pk.TopicName {
 	case gh.topicsCfg.TelemetryTopic:
-		gh.logger.Info("<telemetry> recieved", "client_id", cl.ID, "payload", string(pk.Payload))
-		gh.telemetryChan <- TelemetryMsg{Topic: pk.TopicName, Payload: pk.Payload}
+		gh.echoEvent(gh.topicsCfg.TelemetryTopic, cl, pk)
+	case gh.topicsCfg.AttributeTopic:
+		gh.echoEvent(gh.topicsCfg.AttributeTopic, cl, pk)
 	case gh.topicsCfg.ConnectTopic:
-		gh.logger.Info("<connect> recieved", "client_id", cl.ID, "payload", string(pk.Payload))
-		gh.criticalChan <- CriticalMsg{Type: "connect", Topic: pk.TopicName, Payload: pk.Payload, RecievedAt: time.Now()}
+		gh.echoEvent(gh.topicsCfg.ConnectTopic, cl, pk)
 	case gh.topicsCfg.DisconnectTopic:
-		gh.logger.Info("<disconnect> recieved", "client_id", cl.ID, "payload", string(pk.Payload))
-		gh.criticalChan <- CriticalMsg{Type: "disconnect", Topic: pk.TopicName, Payload: pk.Payload, RecievedAt: time.Now()}
+		gh.echoEvent(gh.topicsCfg.DisconnectTopic, cl, pk)
 	}
 	return pk, nil
+}
+
+func (gh *GatewayHooks) echoEvent(topic string, cl *mqtt.Client, pk packets.Packet) {
+	gh.logger.Info("message recieved", "topic", topic, "client_id", cl.ID, "payload", string(pk.Payload))
+	gh.telemetryChan <- TelemetryMsg{Topic: pk.TopicName, Payload: pk.Payload}
 }

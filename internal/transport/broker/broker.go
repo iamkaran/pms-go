@@ -12,7 +12,14 @@ import (
 )
 
 func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, topicCfg config.TopicList, log *slog.Logger) (chan TelemetryMsg, chan CriticalMsg, func(), error) {
-	server := mqtt.New(&mqtt.Options{})
+	server := mqtt.New(&mqtt.Options{
+		// Capabilities: &mqtt.Capabilities{
+		// 	MaximumSessionExpiryInterval: 3600,
+		// 	MaximumClientWritesPending:   1024,
+		// 	MaximumInflight:              20,
+		// },
+		Logger: log,
+	})
 
 	stop := func() {
 		err := server.Close()

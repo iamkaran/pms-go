@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	topic          = "test/broker"
-	telemetryTopic = "v1/gateway/telemetry"
-	message        = "Test Message"
+	topic   = "test/broker"
+	message = "Test Message"
 )
 
 var mqttMsgChan = make(chan string)
@@ -22,17 +21,17 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 	mqttMsgChan <- string(msg.Payload())
 }
 
-func createClient(cfg config.BrokerConfig) mqtt.Client {
+func createClient(cfg config.BrokerConfig, clientID string) mqtt.Client {
 	broker := fmt.Sprintf("tcp://localhost%s", cfg.Address)
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(broker)
-	opts.SetClientID("go-test-client")
+	opts.SetClientID(clientID)
 
 	return mqtt.NewClient(opts)
 }
 
-func TestBroker(t *testing.T) {
+func TestServeMQTT(t *testing.T) {
 	cfg, err := config.Load("../../../config")
 	if err != nil {
 		t.Fatalf("error loading config %v", err)
@@ -49,7 +48,8 @@ func TestBroker(t *testing.T) {
 
 		time.Sleep(100 * time.Millisecond)
 
-		client := createClient(cfg.Broker)
+		client := createClient(cfg.Broker, "go-test-client-1")
+		defer client.Disconnect(250)
 		token := client.Connect()
 		token.Wait()
 		if token.Error() != nil {
@@ -77,7 +77,8 @@ func TestBroker(t *testing.T) {
 
 		time.Sleep(100 * time.Millisecond)
 
-		client := createClient(cfg.Broker)
+		client := createClient(cfg.Broker, "go-test-client-2")
+		defer client.Disconnect(250)
 		token := client.Connect()
 		token.Wait()
 
@@ -85,8 +86,19 @@ func TestBroker(t *testing.T) {
 			t.Fatalf("failed connecting to broker: %v", token.Error())
 		}
 
-		client.Subscribe(telemetryTopic, 0, messagePubHandler).Wait()
-		client.Publish(telemetryTopic, 0, false, message).Wait()
+		client.Subscribe(cfg.Topics.TelemetryTopic, 0, messagePubHandler).Wait()
+		client.Publish(cfg.Topics.TelemetryTopic, 0, false, message).Wait()
+
+		select {
+		case msg := <-telemetryChan:
+			t.Logf("telemetry hook triggered, topic :%s", string(msg.Topic))
+		case <-time.After(time.Second * 2):
+			t.Fatalf("timed out waiting for response ")
+		}
+		client.Unsubscribe(cfg.Topics.TelemetryTopic)
+
+		client.Subscribe(cfg.Topics.AttributeTopic, 0, messagePubHandler).Wait()
+		client.Publish(cfg.Topics.AttributeTopic, 0, false, message).Wait()
 
 		select {
 		case msg := <-telemetryChan:

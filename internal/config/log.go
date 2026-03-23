@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
@@ -17,7 +18,7 @@ type loggerConfigFile struct {
 func loadLogger(cfg *LoggerConfig, path string) error {
 	var f loggerConfigFile
 	if err := cleanenv.ReadConfig(path, &f); err != nil {
-		return fmt.Errorf("log config: %w")
+		return fmt.Errorf("log config: %w", err)
 	}
 	*cfg = f.Log
 	return cfg.Validate()

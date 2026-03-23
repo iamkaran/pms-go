@@ -24,7 +24,7 @@ func main() {
 	log.Info("pms-go starting")
 
 	log.Info("allow any", "status", cfg.Hook.AllowAny)
-	_, _, stop, err := broker.ServerMQTT(cfg.Broker, cfg.Hook, log)
+	_, _, stop, err := broker.ServerMQTT(cfg.Broker, cfg.Hook, cfg.Topics, log)
 	if err != nil {
 		log.Error("error starting broker", "error", err)
 	}
