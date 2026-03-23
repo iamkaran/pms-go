@@ -11,7 +11,7 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, topicCfg config.TopicList, log *slog.Logger) (chan TelemetryMsg, chan CriticalMsg, func(), error) {
+func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, topicCfg config.TopicList, log *slog.Logger) (chan TelemetryMsg, chan CriticalMsg, func() error, error) {
 	server := mqtt.New(&mqtt.Options{
 		// Capabilities: &mqtt.Capabilities{
 		// 	MaximumSessionExpiryInterval: 3600,
@@ -21,11 +21,12 @@ func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, 
 		Logger: log,
 	})
 
-	stop := func() {
+	stop := func() error {
 		err := server.Close()
 		if err != nil {
-			return
+			return err
 		}
+		return nil
 	}
 
 	if hookCfg.AllowAny {
