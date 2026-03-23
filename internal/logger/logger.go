@@ -1,3 +1,4 @@
+// Package logger provides a the method New() which returns a *slog.Logger serving as a common logger throughout the project
 package logger
 
 import (

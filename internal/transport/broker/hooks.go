@@ -27,6 +27,7 @@ type GatewayHooks struct {
 	logger        *slog.Logger
 	brokerCfg     config.BrokerConfig
 	hookCfg       config.BrokerHookConfig
+	topicsCfg     config.TopicList
 	criticalChan  chan CriticalMsg
 	telemetryChan chan TelemetryMsg
 }
@@ -45,14 +46,15 @@ func (gh *GatewayHooks) OnConnect(cl *mqtt.Client, pk packets.Packet) error {
 }
 
 func (gh *GatewayHooks) OnPublish(cl *mqtt.Client, pk packets.Packet) (packets.Packet, error) {
+	gh.logger.Info("telemetry topic", "topicName", gh.topicsCfg.TelemetryTopic)
 	switch pk.TopicName {
-	case "v1/gateway/telemetry":
+	case gh.topicsCfg.TelemetryTopic:
 		gh.logger.Info("<telemetry> recieved", "client_id", cl.ID, "payload", string(pk.Payload))
 		gh.telemetryChan <- TelemetryMsg{Topic: pk.TopicName, Payload: pk.Payload}
-	case "v1/gateway/connect":
+	case gh.topicsCfg.ConnectTopic:
 		gh.logger.Info("<connect> recieved", "client_id", cl.ID, "payload", string(pk.Payload))
 		gh.criticalChan <- CriticalMsg{Type: "connect", Topic: pk.TopicName, Payload: pk.Payload, RecievedAt: time.Now()}
-	case "v1/gateway/disconnect":
+	case gh.topicsCfg.DisconnectTopic:
 		gh.logger.Info("<disconnect> recieved", "client_id", cl.ID, "payload", string(pk.Payload))
 		gh.criticalChan <- CriticalMsg{Type: "disconnect", Topic: pk.TopicName, Payload: pk.Payload, RecievedAt: time.Now()}
 	}

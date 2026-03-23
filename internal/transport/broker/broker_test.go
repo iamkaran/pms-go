@@ -13,7 +13,7 @@ import (
 const (
 	topic          = "test/broker"
 	telemetryTopic = "v1/gateway/telemetry"
-	message        = "Hello Jasvir!"
+	message        = "Test Message"
 )
 
 var mqttMsgChan = make(chan string)
@@ -41,7 +41,7 @@ func TestBroker(t *testing.T) {
 	log := logger.New("info", "json")
 
 	t.Run("test pub and sub", func(t *testing.T) {
-		_, _, stop, err := ServerMQTT(cfg.Broker, cfg.Hook, log)
+		_, _, stop, err := ServerMQTT(cfg.Broker, cfg.Hook, cfg.Topics, log)
 		if err != nil {
 			t.Fatalf("error serving mqtt broker: %v", err)
 		}
@@ -52,7 +52,6 @@ func TestBroker(t *testing.T) {
 		client := createClient(cfg.Broker)
 		token := client.Connect()
 		token.Wait()
-
 		if token.Error() != nil {
 			t.Fatalf("failed connecting to broker: %v", token.Error())
 		}
@@ -70,7 +69,7 @@ func TestBroker(t *testing.T) {
 		}
 	})
 	t.Run("test telemetry hooking mechanism of broker", func(t *testing.T) {
-		telemetryChan, _, stop, err := ServerMQTT(cfg.Broker, cfg.Hook, log)
+		telemetryChan, _, stop, err := ServerMQTT(cfg.Broker, cfg.Hook, cfg.Topics, log)
 		if err != nil {
 			t.Fatalf("error serving mqtt broker: %v", err)
 		}

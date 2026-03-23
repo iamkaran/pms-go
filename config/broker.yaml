@@ -2,4 +2,5 @@ broker:
   tcp_id: "t1"
   address: ":1883"
 hooks:
+  allow_any: true
   hook_id: "gateway-hook"

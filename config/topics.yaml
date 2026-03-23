@@ -1,0 +1,5 @@
+topics:
+  connect: "v1/gateway/connect"
+  disconnect: "v1/gateway/disconnect"
+  telemetry: "v1/gateway/telemetry"
+  attribute: "v1/gateway/attribute"

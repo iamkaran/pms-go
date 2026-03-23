@@ -11,7 +11,7 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, log *slog.Logger) (chan TelemetryMsg, chan CriticalMsg, func(), error) {
+func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, topicCfg config.TopicList, log *slog.Logger) (chan TelemetryMsg, chan CriticalMsg, func(), error) {
 	server := mqtt.New(&mqtt.Options{})
 
 	stop := func() {
@@ -21,10 +21,12 @@ func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, 
 		}
 	}
 
-	// To allow any connections
-	if err := server.AddHook(new(auth.AllowHook), nil); err != nil {
-		log.Error("add hook", "error", err)
-		return nil, nil, nil, err
+	if hookCfg.AllowAny {
+		// To allow any connections
+		if err := server.AddHook(new(auth.AllowHook), nil); err != nil {
+			log.Error("add hook", "error", err)
+			return nil, nil, nil, err
+		}
 	}
 
 	tcp := listeners.NewTCP(listeners.Config{
@@ -41,7 +43,14 @@ func ServerMQTT(brokerCfg config.BrokerConfig, hookCfg config.BrokerHookConfig, 
 	telemetryChan := make(chan TelemetryMsg, 100)
 	criticalChan := make(chan CriticalMsg, 100)
 
-	err = server.AddHook(&GatewayHooks{logger: log, brokerCfg: brokerCfg, hookCfg: hookCfg, telemetryChan: telemetryChan, criticalChan: criticalChan}, nil)
+	err = server.AddHook(&GatewayHooks{
+		logger:        log,
+		brokerCfg:     brokerCfg,
+		hookCfg:       hookCfg,
+		telemetryChan: telemetryChan,
+		criticalChan:  criticalChan,
+		topicsCfg:     topicCfg,
+	}, nil)
 	if err != nil {
 		log.Error("add hook", "error", err)
 		return nil, nil, nil, err
