@@ -3,9 +3,7 @@
 package broker
 
 import (
-	"errors"
 	"log/slog"
-	"time"
 
 	"github.com/iamkaran/pms-go/internal/config"
 	mqtt "github.com/mochi-mqtt/server/v2"
@@ -55,12 +53,6 @@ func MQTTServer(cfg MQTTServerConfig) MQTTServerResult {
 		}
 	}
 
-	ready := make(chan struct{})
-	rh := &ReadyHook{ready: ready}
-	if err := server.AddHook(rh, nil); err != nil {
-		return MQTTServerResult{Error: err}
-	}
-
 	brokerAddress := cfg.Address
 	if brokerAddress == "" {
 		brokerAddress = cfg.Broker.Address
@@ -99,13 +91,6 @@ func MQTTServer(cfg MQTTServerConfig) MQTTServerResult {
 			cfg.Log.Error("serve", "error", err)
 		}
 	}()
-
-	select {
-	case <-rh.ready:
-		cfg.Log.Info("server started", "result", "success")
-	case <-time.After(5 * time.Second):
-		return MQTTServerResult{Error: errors.New("server start timed out")}
-	}
 
 	return MQTTServerResult{telemetryChan, criticalChan, stop, nil}
 }

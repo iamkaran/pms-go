@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	topic      = "test/broker"
 	message    = "Test Message"
 	configPath = "../../../config"
 )
@@ -80,7 +79,7 @@ func TestServeMQTT(t *testing.T) {
 		connectClient(t, client)
 		defer client.Disconnect(250)
 
-		publishMessage(topic, client, message)
+		publishMessage("test/topic", client, message)
 
 		select {
 		case msg := <-mqttMsgChan:
@@ -111,16 +110,22 @@ func TestServeMQTT(t *testing.T) {
 			t.Fatalf("timed out waiting for response ")
 		}
 
-		client.Unsubscribe(cfg.Topics.TelemetryTopic)
-
-		publishMessage(cfg.Topics.AttributeTopic, client, message)
-
-		select {
-		case msg := <-serverResult.CriticalCh:
-			t.Logf("telemetry hook triggered, topic :%s", string(msg.Topic))
-		case <-time.After(time.Second * 2):
-			t.Fatalf("timed out waiting for response ")
+		criticalTopics := []string{
+			cfg.Topics.AttributeTopic,
+			cfg.Topics.ConnectTopic,
+			cfg.Topics.DisconnectTopic,
 		}
+
+		for _, topic := range criticalTopics {
+			publishMessage(topic, client, message)
+			select {
+			case msg := <-serverResult.CriticalCh:
+				t.Logf("type critical hook triggered, topic :%s", string(msg.Topic))
+			case <-time.After(time.Second * 2):
+				t.Fatalf("timed out waiting for response ")
+			}
+		}
+
 		if err := serverResult.Shutdown(); err != nil {
 			t.Fatalf("error stopping server: %v", err)
 		}
