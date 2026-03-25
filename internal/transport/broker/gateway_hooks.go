@@ -23,6 +23,8 @@ type TelemetryMsg struct {
 	Payload []byte
 }
 
+// TODO: Add a waitgroup to prevent hanging writers
+
 type GatewayHooks struct {
 	mqtt.HookBase
 	ctx           context.Context
@@ -86,7 +88,8 @@ func (gh *GatewayHooks) echoEvent(topic string, cl *mqtt.Client, pk packets.Pack
 			ReceivedAt: time.Now(),
 		}:
 		case <-gh.ctx.Done():
-			gh.logger.Warn("context cancelled, dropping critical msg", "topic", topic)
+			// TODO: Improve the handling of dropped messages
+			gh.logger.Error("context cancelled, dropping critical msg", "topic", topic)
 		}
 	}
 }
