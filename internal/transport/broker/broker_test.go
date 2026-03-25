@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"testing"
@@ -16,12 +17,11 @@ const (
 	configPath = "../../../config"
 )
 
-var (
-	mqttMsgChan                           = make(chan string)
-	messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
-		mqttMsgChan <- string(msg.Payload())
+func makeMessageHandler(ch chan string) mqtt.MessageHandler {
+	return func(client mqtt.Client, msg mqtt.Message) {
+		ch <- string(msg.Payload())
 	}
-)
+}
 
 func createClient(address string, clientID string) mqtt.Client {
 	broker := fmt.Sprintf("tcp://127.0.0.1%s", address)
@@ -42,14 +42,14 @@ func connectClient(t testing.TB, client mqtt.Client) {
 	}
 }
 
-func publishMessage(publishTopic string, client mqtt.Client, publishMessage string) {
-	client.Subscribe(publishTopic, 0, messagePubHandler).Wait()
+func publishMessage(msgChan chan string, publishTopic string, client mqtt.Client, publishMessage string) {
+	client.Subscribe(publishTopic, 0, makeMessageHandler(msgChan)).Wait()
 	client.Publish(publishTopic, 0, false, publishMessage).Wait()
 }
 
-func createMQTTServer(t testing.TB, cfg *config.Config, log *slog.Logger, address string) MQTTServerResult {
+func createMQTTServer(t testing.TB, ctx context.Context, cfg *config.Config, log *slog.Logger, address string) MQTTServerResult {
 	t.Helper()
-	serverResult := MQTTServer(MQTTServerConfig{
+	serverResult := MQTTServer(ctx, MQTTServerConfig{
 		Broker:  cfg.Broker,
 		Hook:    cfg.Hook,
 		Topic:   cfg.Topics,
@@ -73,41 +73,53 @@ func TestServeMQTT(t *testing.T) {
 
 	t.Run("test pub and sub", func(t *testing.T) {
 		address := ":1883"
-		serverResult := createMQTTServer(t, cfg, log, address)
+		ctx, cancel := context.WithCancel(context.Background())
+		serverResult := createMQTTServer(t, ctx, cfg, log, address)
 
 		client := createClient(address, "go-test-client-1")
 		connectClient(t, client)
 		defer client.Disconnect(250)
 
-		publishMessage("test/topic", client, message)
+		msgChan := make(chan string, 1)
+		publishMessage(msgChan, "test/topic", client, message)
 
 		select {
-		case msg := <-mqttMsgChan:
+		case msg := <-msgChan:
 			if msg != message {
 				t.Fatalf("got %s, want %s", msg, message)
 			}
 		case <-time.After(time.Second * 2):
 			t.Fatalf("timed out waiting for response")
+		case err := <-serverResult.ErrorCh:
+			t.Fatalf("server internal error: %v", err)
 		}
-		if err := serverResult.Shutdown(); err != nil {
-			t.Fatalf("error stopping server: %v", err)
+		cancel()
+		err = <-serverResult.ErrorCh
+		if err != nil {
+			log.Error("server close", "error", err)
+		} else {
+			log.Info("server close", "status", "success")
 		}
 	})
 	t.Run("test telemetry hooking mechanism of broker", func(t *testing.T) {
 		address := ":1883"
-		serverResult := createMQTTServer(t, cfg, log, address)
+		ctx, cancel := context.WithCancel(context.Background())
+		serverResult := createMQTTServer(t, ctx, cfg, log, address)
 
 		client := createClient(address, "go-test-client-1")
 		connectClient(t, client)
 		defer client.Disconnect(250)
 
-		publishMessage(cfg.Topics.TelemetryTopic, client, message)
+		msgChan := make(chan string, 10)
+		publishMessage(msgChan, cfg.Topics.TelemetryTopic, client, message)
 
 		select {
 		case msg := <-serverResult.TelemetryCh:
 			t.Logf("telemetry hook triggered, topic :%s", string(msg.Topic))
 		case <-time.After(time.Second * 2):
 			t.Fatalf("timed out waiting for response ")
+		case err := <-serverResult.ErrorCh:
+			t.Fatalf("server internal error: %v", err)
 		}
 
 		criticalTopics := []string{
@@ -117,17 +129,24 @@ func TestServeMQTT(t *testing.T) {
 		}
 
 		for _, topic := range criticalTopics {
-			publishMessage(topic, client, message)
+			publishMessage(msgChan, topic, client, message)
 			select {
 			case msg := <-serverResult.CriticalCh:
 				t.Logf("type critical hook triggered, topic :%s", string(msg.Topic))
 			case <-time.After(time.Second * 2):
 				t.Fatalf("timed out waiting for response ")
+			case err := <-serverResult.ErrorCh:
+				t.Fatalf("server internal error: %v", err)
 			}
 		}
 
-		if err := serverResult.Shutdown(); err != nil {
-			t.Fatalf("error stopping server: %v", err)
+		cancel()
+
+		err = <-serverResult.ErrorCh
+		if err != nil {
+			log.Error("server close", "error", err)
+		} else {
+			log.Info("server close", "status", "success")
 		}
 	})
 }
