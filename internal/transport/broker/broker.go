@@ -5,6 +5,7 @@ package broker
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/iamkaran/pms-go/internal/config"
 	mqtt "github.com/mochi-mqtt/server/v2"
@@ -87,13 +88,34 @@ func MQTTServer(ctx context.Context, cfg MQTTServerConfig) MQTTServerResult {
 		return fail(err)
 	}
 
-	if err := server.Serve(); err != nil {
-		return fail(err)
+	var once sync.Once
+
+	safeClose := func(err error) {
+		once.Do(func() {
+			closingErr := server.Close()
+			serverCancel()
+
+			var finalErr error
+			if err != nil {
+				finalErr = err
+			} else {
+				finalErr = closingErr
+			}
+
+			errCh <- finalErr
+
+			close(errCh)
+		})
 	}
 
 	go func() {
+		if err := server.Serve(); err != nil {
+			safeClose(err)
+		}
+	}()
+	go func() {
 		<-serverCtx.Done()
-		errCh <- server.Close()
+		safeClose(nil)
 	}()
 
 	return MQTTServerResult{
