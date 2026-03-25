@@ -4,6 +4,7 @@ package logger
 import (
 	"log/slog"
 	"os"
+	"path/filepath"
 )
 
 func New(level string, format string) *slog.Logger {
@@ -19,8 +20,25 @@ func New(level string, format string) *slog.Logger {
 		l = slog.LevelInfo
 	}
 
-	opts := &slog.HandlerOptions{Level: l}
+	replaceAttr := func(groups []string, a slog.Attr) slog.Attr {
+		// Check if the attribute key is the source key
+		if a.Key == slog.SourceKey {
+			// Try to get the source value as a *slog.Source
+			if source, ok := a.Value.Any().(*slog.Source); ok {
+				// Use filepath.Base to get only the file name
+				source.File = filepath.Base(source.File)
+				// Remove the function name field if it exists, as requested
+				source.Function = ""
+			}
+		}
+		return a
+	}
 
+	opts := &slog.HandlerOptions{
+		Level:       l,
+		AddSource:   true, // Enable source location tracking
+		ReplaceAttr: replaceAttr,
+	}
 	var handler slog.Handler
 
 	if format == "text" {

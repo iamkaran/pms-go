@@ -3,6 +3,7 @@
 package broker
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/iamkaran/pms-go/internal/config"
@@ -14,7 +15,7 @@ import (
 type MQTTServerResult struct {
 	TelemetryCh chan TelemetryMsg
 	CriticalCh  chan CriticalMsg
-	Shutdown    func() error
+	ErrorCh     chan error
 	Error       error
 }
 
@@ -26,7 +27,15 @@ type MQTTServerConfig struct {
 	Address string
 }
 
-func MQTTServer(cfg MQTTServerConfig) MQTTServerResult {
+func MQTTServer(ctx context.Context, cfg MQTTServerConfig) MQTTServerResult {
+	serverCtx, serverCancel := context.WithCancel(ctx)
+	errCh := make(chan error, 2)
+
+	fail := func(err error) MQTTServerResult {
+		serverCancel()
+		return MQTTServerResult{Error: err}
+	}
+
 	caps := mqtt.NewDefaultServerCapabilities()
 	caps.MaximumSessionExpiryInterval = 3600
 	caps.MaximumClientWritesPending = 1024
@@ -37,19 +46,11 @@ func MQTTServer(cfg MQTTServerConfig) MQTTServerResult {
 		Logger:       cfg.Log,
 	})
 
-	stop := func() error {
-		err := server.Close()
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-
 	if cfg.Hook.AllowAny {
 		// To allow any connections
 		if err := server.AddHook(new(auth.AllowHook), nil); err != nil {
 			cfg.Log.Error("add hook", "error", err)
-			return MQTTServerResult{nil, nil, nil, err}
+			return fail(err)
 		}
 	}
 
@@ -66,13 +67,14 @@ func MQTTServer(cfg MQTTServerConfig) MQTTServerResult {
 	err := server.AddListener(tcp)
 	if err != nil {
 		cfg.Log.Error("tcp listener", "error", err)
-		return MQTTServerResult{nil, nil, nil, err}
+		return fail(err)
 	}
 
 	telemetryChan := make(chan TelemetryMsg, 100)
 	criticalChan := make(chan CriticalMsg, 100)
 
 	err = server.AddHook(&GatewayHooks{
+		ctx:           serverCtx,
 		logger:        cfg.Log,
 		brokerCfg:     cfg.Broker,
 		hookCfg:       cfg.Hook,
@@ -82,15 +84,22 @@ func MQTTServer(cfg MQTTServerConfig) MQTTServerResult {
 	}, nil)
 	if err != nil {
 		cfg.Log.Error("add hook", "error", err)
-		return MQTTServerResult{nil, nil, nil, err}
+		return fail(err)
+	}
+
+	if err := server.Serve(); err != nil {
+		return fail(err)
 	}
 
 	go func() {
-		err := server.Serve()
-		if err != nil {
-			cfg.Log.Error("serve", "error", err)
-		}
+		<-serverCtx.Done()
+		errCh <- server.Close()
 	}()
 
-	return MQTTServerResult{telemetryChan, criticalChan, stop, nil}
+	return MQTTServerResult{
+		TelemetryCh: telemetryChan,
+		CriticalCh:  criticalChan,
+		ErrorCh:     errCh,
+		Error:       nil,
+	}
 }

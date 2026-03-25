@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -14,7 +15,7 @@ type CriticalMsg struct {
 	Type       core.EventType
 	Topic      string
 	Payload    []byte
-	RecievedAt time.Time
+	ReceivedAt time.Time
 }
 
 type TelemetryMsg struct {
@@ -24,6 +25,7 @@ type TelemetryMsg struct {
 
 type GatewayHooks struct {
 	mqtt.HookBase
+	ctx           context.Context
 	logger        *slog.Logger
 	brokerCfg     config.BrokerConfig
 	hookCfg       config.BrokerHookConfig
@@ -51,15 +53,40 @@ func (gh *GatewayHooks) OnPublish(cl *mqtt.Client, pk packets.Packet) (packets.P
 }
 
 func (gh *GatewayHooks) echoEvent(topic string, cl *mqtt.Client, pk packets.Packet) {
-	gh.logger.Info("message recieved", "topic", topic, "client_id", cl.ID, "payload", string(pk.Payload))
+	gh.logger.Info("message received", "topic", topic, "client_id", cl.ID, "payload", string(pk.Payload))
+
 	switch topic {
 	case gh.topicsCfg.TelemetryTopic:
-		gh.telemetryChan <- TelemetryMsg{Topic: pk.TopicName, Payload: pk.Payload}
-	case gh.topicsCfg.AttributeTopic:
-		gh.criticalChan <- CriticalMsg{Topic: pk.TopicName, Payload: pk.Payload, RecievedAt: time.Now()}
-	case gh.topicsCfg.ConnectTopic:
-		gh.criticalChan <- CriticalMsg{Topic: pk.TopicName, Payload: pk.Payload, RecievedAt: time.Now()}
-	case gh.topicsCfg.DisconnectTopic:
-		gh.criticalChan <- CriticalMsg{Topic: pk.TopicName, Payload: pk.Payload, RecievedAt: time.Now()}
+		select {
+		case gh.telemetryChan <- TelemetryMsg{Topic: pk.TopicName, Payload: pk.Payload}:
+		case <-gh.ctx.Done():
+			gh.logger.Warn("context cancelled, dropping telemetry msg", "topic", topic)
+		default:
+			gh.logger.Warn("channel full, dropping message", "topic", topic)
+		}
+	case gh.topicsCfg.AttributeTopic,
+		gh.topicsCfg.ConnectTopic,
+		gh.topicsCfg.DisconnectTopic:
+
+		var eventType core.EventType
+		switch topic {
+		case gh.topicsCfg.AttributeTopic:
+			eventType = core.EventAttribute
+		case gh.topicsCfg.ConnectTopic:
+			eventType = core.EventConnect
+		case gh.topicsCfg.DisconnectTopic:
+			eventType = core.EventDisconnect
+		}
+
+		select {
+		case gh.criticalChan <- CriticalMsg{
+			Type:       eventType,
+			Topic:      pk.TopicName,
+			Payload:    pk.Payload,
+			ReceivedAt: time.Now(),
+		}:
+		case <-gh.ctx.Done():
+			gh.logger.Warn("context cancelled, dropping critical msg", "topic", topic)
+		}
 	}
 }
