@@ -24,11 +24,19 @@ func main() {
 	log.Info("pms-go starting")
 
 	log.Info("allow any", "status", cfg.Hook.AllowAny)
-	_, _, stop, err := broker.ServerMQTT(cfg.Broker, cfg.Hook, cfg.Topics, log)
+	serverResult := broker.MQTTServer(broker.MQTTServerConfig{
+		Broker: cfg.Broker,
+		Hook:   cfg.Hook,
+		Topic:  cfg.Topics,
+		Log:    log,
+	})
 	if err != nil {
 		log.Error("error starting broker", "error", err)
 	}
 
 	<-quit
-	stop()
+	err = serverResult.Shutdown()
+	if err != nil {
+		log.Error("error shutting down server: %v", "error", err)
+	}
 }

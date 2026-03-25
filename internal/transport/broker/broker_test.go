@@ -2,6 +2,7 @@ package broker
 
 import (
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -11,18 +12,20 @@ import (
 )
 
 const (
-	topic   = "test/broker"
-	message = "Test Message"
+	topic      = "test/broker"
+	message    = "Test Message"
+	configPath = "../../../config"
 )
 
-var mqttMsgChan = make(chan string)
+var (
+	mqttMsgChan                           = make(chan string)
+	messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
+		mqttMsgChan <- string(msg.Payload())
+	}
+)
 
-var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
-	mqttMsgChan <- string(msg.Payload())
-}
-
-func createClient(cfg config.BrokerConfig, clientID string) mqtt.Client {
-	broker := fmt.Sprintf("tcp://localhost%s", cfg.Address)
+func createClient(address string, clientID string) mqtt.Client {
+	broker := fmt.Sprintf("tcp://127.0.0.1%s", address)
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(broker)
@@ -31,8 +34,38 @@ func createClient(cfg config.BrokerConfig, clientID string) mqtt.Client {
 	return mqtt.NewClient(opts)
 }
 
+func connectClient(t testing.TB, client mqtt.Client) {
+	token := client.Connect()
+	token.Wait()
+	err := token.Error()
+	if err != nil {
+		t.Fatalf("error connecting to broker: %v", err)
+	}
+}
+
+func publishMessage(publishTopic string, client mqtt.Client, publishMessage string) {
+	client.Subscribe(publishTopic, 0, messagePubHandler).Wait()
+	client.Publish(publishTopic, 0, false, publishMessage).Wait()
+}
+
+func createMQTTServer(t testing.TB, cfg *config.Config, log *slog.Logger, address string) MQTTServerResult {
+	t.Helper()
+	serverResult := MQTTServer(MQTTServerConfig{
+		Broker:  cfg.Broker,
+		Hook:    cfg.Hook,
+		Topic:   cfg.Topics,
+		Log:     log,
+		Address: address,
+	})
+
+	if serverResult.Error != nil {
+		t.Fatalf("error serving mqtt broker: %v", serverResult.Error)
+	}
+	return serverResult
+}
+
 func TestServeMQTT(t *testing.T) {
-	cfg, err := config.Load("../../../config")
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		t.Fatalf("error loading config %v", err)
 	}
@@ -40,24 +73,14 @@ func TestServeMQTT(t *testing.T) {
 	log := logger.New("info", "json")
 
 	t.Run("test pub and sub", func(t *testing.T) {
-		_, _, stop, err := ServerMQTT(cfg.Broker, cfg.Hook, cfg.Topics, log)
-		if err != nil {
-			t.Fatalf("error serving mqtt broker: %v", err)
-		}
-		defer stop()
+		address := ":1883"
+		serverResult := createMQTTServer(t, cfg, log, address)
 
-		time.Sleep(100 * time.Millisecond)
-
-		client := createClient(cfg.Broker, "go-test-client-1")
+		client := createClient(address, "go-test-client-1")
+		connectClient(t, client)
 		defer client.Disconnect(250)
-		token := client.Connect()
-		token.Wait()
-		if token.Error() != nil {
-			t.Fatalf("failed connecting to broker: %v", token.Error())
-		}
 
-		client.Subscribe(topic, 0, messagePubHandler).Wait()
-		client.Publish(topic, 0, false, message).Wait()
+		publishMessage(topic, client, message)
 
 		select {
 		case msg := <-mqttMsgChan:
@@ -67,44 +90,39 @@ func TestServeMQTT(t *testing.T) {
 		case <-time.After(time.Second * 2):
 			t.Fatalf("timed out waiting for response")
 		}
+		if err := serverResult.Shutdown(); err != nil {
+			t.Fatalf("error stopping server: %v", err)
+		}
 	})
 	t.Run("test telemetry hooking mechanism of broker", func(t *testing.T) {
-		telemetryChan, _, stop, err := ServerMQTT(cfg.Broker, cfg.Hook, cfg.Topics, log)
-		if err != nil {
-			t.Fatalf("error serving mqtt broker: %v", err)
-		}
-		defer stop()
+		address := ":1883"
+		serverResult := createMQTTServer(t, cfg, log, address)
 
-		time.Sleep(100 * time.Millisecond)
-
-		client := createClient(cfg.Broker, "go-test-client-2")
+		client := createClient(address, "go-test-client-1")
+		connectClient(t, client)
 		defer client.Disconnect(250)
-		token := client.Connect()
-		token.Wait()
 
-		if token.Error() != nil {
-			t.Fatalf("failed connecting to broker: %v", token.Error())
-		}
-
-		client.Subscribe(cfg.Topics.TelemetryTopic, 0, messagePubHandler).Wait()
-		client.Publish(cfg.Topics.TelemetryTopic, 0, false, message).Wait()
+		publishMessage(cfg.Topics.TelemetryTopic, client, message)
 
 		select {
-		case msg := <-telemetryChan:
+		case msg := <-serverResult.TelemetryCh:
 			t.Logf("telemetry hook triggered, topic :%s", string(msg.Topic))
 		case <-time.After(time.Second * 2):
 			t.Fatalf("timed out waiting for response ")
 		}
+
 		client.Unsubscribe(cfg.Topics.TelemetryTopic)
 
-		client.Subscribe(cfg.Topics.AttributeTopic, 0, messagePubHandler).Wait()
-		client.Publish(cfg.Topics.AttributeTopic, 0, false, message).Wait()
+		publishMessage(cfg.Topics.AttributeTopic, client, message)
 
 		select {
-		case msg := <-telemetryChan:
+		case msg := <-serverResult.CriticalCh:
 			t.Logf("telemetry hook triggered, topic :%s", string(msg.Topic))
 		case <-time.After(time.Second * 2):
 			t.Fatalf("timed out waiting for response ")
+		}
+		if err := serverResult.Shutdown(); err != nil {
+			t.Fatalf("error stopping server: %v", err)
 		}
 	})
 }
